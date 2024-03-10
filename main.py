@@ -11,6 +11,7 @@ import numpy as np
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from tkcalendar import DateEntry
 
 # Database connection
 db = mysql.connector.connect(
@@ -134,33 +135,50 @@ def create_login_window():
 #     except mysql.connector.IntegrityError:
 #         messagebox.showerror("Error", "Student ID already exists. Please use a different ID.")
 
-
 def capture_image():
     cap = cv2.VideoCapture(0)
-    ret, frame = cap.read()
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Display the live feed
+        cv2.putText(frame, "Press 'c' to Capture", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.imshow("Live Feed", frame)
+
+        key = cv2.waitKey(1)
+        if key == ord('c'):
+            # Encode face image
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            face_locations = face_recognition.face_locations(rgb_frame)
+            if not face_locations:
+                messagebox.showerror("Error", "No face detected. Please try again.")
+                continue
+
+            face_encoding = face_recognition.face_encodings(rgb_frame, face_locations)[0]
+
+            global face_encoding_bytes
+            # Convert face encoding to bytes
+            face_encoding_bytes = face_encoding.tobytes()
+
+            # Store the captured image data in a global variable for registration
+            global captured_image_data
+            captured_image_data = face_encoding_bytes
+
+            messagebox.showinfo("Success", "Image captured successfully.")
+
+            # Close the OpenCV window after 1 second
+            root.after(1000, lambda: cv2.destroyAllWindows())
+            break
+
+        elif key == 27 or key == ord('q'):  # Press ESC or 'q' to exit
+            break
+
     cap.release()
 
-    # Encode face image
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_frame)
-    if not face_locations:
-        messagebox.showerror("Error", "No face detected. Please try again.")
-        return
 
-    face_encoding = face_recognition.face_encodings(rgb_frame, face_locations)[0]
 
-    global face_encoding_bytes
-    # Convert face encoding to bytes
-    face_encoding_bytes = face_encoding.tobytes()
-
-    # Store the captured image data in global variable for registration
-    global captured_image_data
-    captured_image_data = face_encoding_bytes
-
-    messagebox.showinfo("Success", "Image captured successfully.")
-    cv2.imshow("Registered Image", frame)
-    cv2.waitKey(5000)
-    cv2.destroyAllWindows()
 
 # Function to handle student registration
 def register_student():
@@ -257,12 +275,12 @@ def mark_attendance():
                 name = known_face_names[matched_idx]
                 student_id = known_student_ids[matched_idx]
 
-            # Get current date and time
+                # Get current date and time
                 current_date = datetime.date.today()
                 current_time = datetime.datetime.now().time()
 
-            if (student_id, name) not in last_attendance_time or \
-                        (datetime.datetime.now() - last_attendance_time[(student_id, name)]).seconds >= 60:
+                if (student_id, name) not in last_attendance_time or \
+                    (datetime.datetime.now() - last_attendance_time[(student_id, name)]).seconds >= 60:
 
                     # Insert attendance data into the database
                     sql = "INSERT INTO attendance (student_id, name, date, time) VALUES (%s, %s, %s, %s)"
@@ -284,6 +302,7 @@ def mark_attendance():
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 def export_attendance():
     cursor.execute("SELECT student_id, name, date, time FROM attendance")
@@ -325,6 +344,37 @@ def export_attendance_pdf():
     doc.build(content)
 
     messagebox.showinfo("Success", f"Attendance exported as PDF file: {filename}.")
+# Define global variables
+text_box = None
+date_entry = None
+def view_attendance():
+    selected_date = date_entry.get_date()
+
+    # Validate input
+    if not selected_date:
+        messagebox.showerror("Error", "Please select a date.")
+        return
+
+    # Query attendance data based on the selected date
+    query = """
+    SELECT student_id, name, date, time 
+    FROM attendance 
+    WHERE DATE(date) = %s
+    """
+    values = (selected_date,)
+
+    cursor.execute(query, values)
+    attendance_records = cursor.fetchall()
+
+    # Clear any existing data in the treeview
+    for row in tree.get_children():
+        tree.delete(row)
+
+    # Insert new data into the treeview
+    for record in attendance_records:
+        tree.insert("", "end", values=record)
+
+
 
 # Create the main window
 def create_main_window():
@@ -408,7 +458,7 @@ def create_main_window():
     female_radio.grid(row=7, column=2)
 
     capture_button = ttk.Button(registration_tab, text="Capture Image", command=capture_image)
-    capture_button.grid(row=8, column=0, columnspan=2, padx=10, pady=10)
+    capture_button.grid(row=8, column=0, columnspan=2, padx=0, pady=10)
 
     register_button = ttk.Button(registration_tab, text="Register", command=register_student)
     register_button.grid(row=9, column=0, columnspan=2, padx=10, pady=10)
@@ -426,6 +476,44 @@ def create_main_window():
     export_pdf_button = ttk.Button(attendance_tab, text="Export as PDF", command=export_attendance_pdf)
     export_pdf_button.pack(padx=10, pady=10)
     
+
+    # View Attendance tab
+    view_attendance_tab = ttk.Frame(notebook)
+    notebook.add(view_attendance_tab, text="View Attendance")
+
+     # Date Field
+    date_label = ttk.Label(view_attendance_tab, text="Date:")
+    date_label.grid(row=0, column=0, padx=10, pady=10)
+
+    global date_entry
+    date_entry = DateEntry(view_attendance_tab)
+    date_entry.grid(row=0, column=1, padx=10, pady=10)
+
+
+    # # Year Option
+    # year_label = ttk.Label(view_attendance_tab, text="Year:")
+    # year_label.grid(row=1, column=0, padx=10, pady=10)
+    # years = ['FE', 'SE', 'TE', 'BE']
+    # global year_var_view
+    # year_var_view = tk.StringVar()
+    # year_dropdown_view = ttk.Combobox(view_attendance_tab, textvariable=year_var_view, values=years, state='readonly')
+    # year_dropdown_view.grid(row=1, column=1, padx=10, pady=10)
+
+    # Button to view attendance
+    view_attendance_button = ttk.Button(view_attendance_tab, text="View Attendance", command=view_attendance)
+    view_attendance_button.grid(row=5, column=0, columnspan=2, padx=10, pady=10)
+
+    global tree
+    # Treeview for table display
+    tree = ttk.Treeview(view_attendance_tab, columns=("Student ID", "Name", "Date", "Time"), show="headings")
+    tree.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+
+    # Define column headings
+    tree.heading("Student ID", text="Student ID")
+    tree.heading("Name", text="Name")
+    tree.heading("Date", text="Date")
+    tree.heading("Time", text="Time")
+
     root.mainloop()
 
 
