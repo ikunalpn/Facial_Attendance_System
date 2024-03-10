@@ -257,6 +257,7 @@ def mark_attendance():
         known_face_names.append(name)
         known_student_ids.append(student_id)
 
+   
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -279,12 +280,15 @@ def mark_attendance():
                 current_date = datetime.date.today()
                 current_time = datetime.datetime.now().time()
 
+                # Get selected subject
+                selected_subject = subject_var.get()
+
                 if (student_id, name) not in last_attendance_time or \
                     (datetime.datetime.now() - last_attendance_time[(student_id, name)]).seconds >= 60:
 
                     # Insert attendance data into the database
-                    sql = "INSERT INTO attendance (student_id, name, date, time) VALUES (%s, %s, %s, %s)"
-                    values = (student_id, name, current_date, current_time)
+                    sql = "INSERT INTO attendance (student_id, name, date, time, subject) VALUES (%s, %s, %s, %s, %s)"
+                    values = (student_id, name, current_date, current_time, selected_subject)
                     cursor.execute(sql, values)
                     db.commit()
 
@@ -303,31 +307,32 @@ def mark_attendance():
     cap.release()
     cv2.destroyAllWindows()
 
-
 def export_attendance():
-    cursor.execute("SELECT student_id, name, date, time FROM attendance")
+    subject = subject_var.get()
+    cursor.execute("SELECT student_id, name, subject, date, time FROM attendance WHERE subject = %s", (subject,))
     rows = cursor.fetchall()
 
     # Generate a unique filename with the current date and time
     current_datetime = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join("Attendance_Sheets", f"attendance_{current_datetime}.csv")
+    filename = os.path.join("Attendance_Sheets", f"attendance_{subject}_{current_datetime}.csv")
 
     with open(filename, "w", newline="") as csvfile:
         csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(["Student ID", "Name", "Date", "Time"])
+        csv_writer.writerow(["Student ID", "Name", "Subject", "Date", "Time"])
         csv_writer.writerows(rows)
 
-    messagebox.showinfo("Success", f"Attendance exported as CSV file: {filename}.")
+    messagebox.showinfo("Success", f"Attendance for {subject} exported as CSV file: {filename}.")
 
 def export_attendance_pdf():
-    cursor.execute("SELECT student_id, name, date, time FROM attendance")
+    subject = subject_var.get()
+    cursor.execute("SELECT student_id, name, subject, date, time FROM attendance WHERE subject = %s", (subject,))
     rows = cursor.fetchall()
 
     # Generate a unique filename with the current date and time
     current_datetime = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join("Attendance_Sheets", f"attendance_{current_datetime}.pdf")
+    filename = os.path.join("Attendance_Sheets", f"attendance_{subject}_{current_datetime}.pdf")
     doc = SimpleDocTemplate(filename, pagesize=letter)
-    table_data = [["Student ID", "Name", "Date", "Time"]]
+    table_data = [["Student ID", "Name", "Subject", "Date", "Time"]]
     table_data.extend(rows)
 
     table = Table(table_data)
@@ -343,25 +348,26 @@ def export_attendance_pdf():
     content = [table]
     doc.build(content)
 
-    messagebox.showinfo("Success", f"Attendance exported as PDF file: {filename}.")
-# Define global variables
-text_box = None
-date_entry = None
+    messagebox.showinfo("Success", f"Attendance for {subject} exported as PDF file: {filename}.")
+
+
+
 def view_attendance():
     selected_date = date_entry.get_date()
+    selected_subject = subject_var_view.get()  # Retrieve selected subject
 
     # Validate input
     if not selected_date:
         messagebox.showerror("Error", "Please select a date.")
         return
 
-    # Query attendance data based on the selected date
+    # Query attendance data based on the selected date and subject
     query = """
     SELECT student_id, name, date, time 
     FROM attendance 
-    WHERE DATE(date) = %s
+    WHERE DATE(date) = %s AND subject = %s
     """
-    values = (selected_date,)
+    values = (selected_date, selected_subject)  # Pass both selected date and subject as values
 
     cursor.execute(query, values)
     attendance_records = cursor.fetchall()
@@ -373,7 +379,6 @@ def view_attendance():
     # Insert new data into the treeview
     for record in attendance_records:
         tree.insert("", "end", values=record)
-
 
 
 # Create the main window
@@ -463,9 +468,24 @@ def create_main_window():
     register_button = ttk.Button(registration_tab, text="Register", command=register_student)
     register_button.grid(row=9, column=0, columnspan=2, padx=10, pady=10)
 
+
+
+
+
+
     # Attendance tab
     attendance_tab = ttk.Frame(notebook)
     notebook.add(attendance_tab, text="Attendance")
+
+    
+    subject_label = ttk.Label(attendance_tab, text="Select subject:")
+    subject_label.pack(padx=10, pady=10)
+
+    global subject_var
+    subject_options = ['CSS', 'SPCC', 'AI', 'MC', 'IOT']
+    subject_var = tk.StringVar()
+    subject_dropdown = ttk.Combobox(attendance_tab, textvariable=subject_var, values=subject_options, state='readonly')
+    subject_dropdown.pack(padx=10, pady=10)
 
     attendance_button = ttk.Button(attendance_tab, text="Mark Attendance", command=mark_attendance)
     attendance_button.pack(padx=10, pady=10)
@@ -477,17 +497,11 @@ def create_main_window():
     export_pdf_button.pack(padx=10, pady=10)
     
 
-    # View Attendance tab
-    view_attendance_tab = ttk.Frame(notebook)
-    notebook.add(view_attendance_tab, text="View Attendance")
 
-     # Date Field
-    date_label = ttk.Label(view_attendance_tab, text="Date:")
-    date_label.grid(row=0, column=0, padx=10, pady=10)
 
-    global date_entry
-    date_entry = DateEntry(view_attendance_tab)
-    date_entry.grid(row=0, column=1, padx=10, pady=10)
+
+
+
 
 
     # # Year Option
@@ -498,15 +512,34 @@ def create_main_window():
     # year_var_view = tk.StringVar()
     # year_dropdown_view = ttk.Combobox(view_attendance_tab, textvariable=year_var_view, values=years, state='readonly')
     # year_dropdown_view.grid(row=1, column=1, padx=10, pady=10)
+# View Attendance tab
+    view_attendance_tab = ttk.Frame(notebook)
+    notebook.add(view_attendance_tab, text="View Attendance")
 
-    # Button to view attendance
+    date_label = ttk.Label(view_attendance_tab, text="Date:")
+    date_label.grid(row=0, column=0, padx=10, pady=10)
+
+    global date_entry
+    date_entry = DateEntry(view_attendance_tab)
+    date_entry.grid(row=0, column=1, padx=10, pady=10)
+
+    # Add label and dropdown for subject selection
+    subject_label_view = ttk.Label(view_attendance_tab, text="Select subject:")
+    subject_label_view.grid(row=1, column=0, padx=10, pady=10)
+
+    global subject_var_view
+    subject_options_view = ['CSS', 'SPCC', 'AI', 'MC', 'IOT']
+    subject_var_view = tk.StringVar()
+    subject_dropdown_view = ttk.Combobox(view_attendance_tab, textvariable=subject_var_view, values=subject_options_view, state='readonly')
+    subject_dropdown_view.grid(row=1, column=1, padx=10, pady=10)
+
     view_attendance_button = ttk.Button(view_attendance_tab, text="View Attendance", command=view_attendance)
-    view_attendance_button.grid(row=5, column=0, columnspan=2, padx=10, pady=10)
+    view_attendance_button.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
     global tree
     # Treeview for table display
     tree = ttk.Treeview(view_attendance_tab, columns=("Student ID", "Name", "Date", "Time"), show="headings")
-    tree.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+    tree.grid(row=3, column=0, columnspan=2, padx=10, pady=10)
 
     # Define column headings
     tree.heading("Student ID", text="Student ID")
